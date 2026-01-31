@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/services.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -118,28 +119,32 @@ class _ThermographyHomeState extends State<ThermographyHome> {
     }
   }
   Future<void> generatePdfReport() async {
-    if (thermalBytes == null || referenceBytes == null) {
-      _snack('Please upload both Thermal & Reference images.');
+    if (thermalBytes == null) {
+      _snack('Please upload thermal image.');
       return;
     }
 
     setState(() => generating = true);
 
     try {
+      final font = await rootBundle.load("assets/fonts/NotoSans-Regular.ttf");
+      final ttf = pw.Font.ttf(font);
+
       final pdf = pw.Document();
 
       final thermalImg = pw.MemoryImage(thermalBytes!);
-      final refImg = pw.MemoryImage(referenceBytes!);
+      final refImg =
+      referenceBytes != null ? pw.MemoryImage(referenceBytes!) : null;
 
       final statusText = isInitial ? 'Initial' : 'Follow-up';
 
       pdf.addPage(
         pw.Page(
+          theme: pw.ThemeData.withFont(base: ttf, bold: ttf),
           pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(18),
           build: (context) {
             return pw.Container(
-              color: PdfColors.white,
               padding: const pw.EdgeInsets.all(10),
               child: pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -147,41 +152,27 @@ class _ThermographyHomeState extends State<ThermographyHome> {
 
                   /// ================= HEADER =================
                   pw.Table(
-                    border: pw.TableBorder.all(color: PdfColors.black),
-                    columnWidths: {
-                      0: const pw.FlexColumnWidth(1.2),
-                      1: const pw.FlexColumnWidth(1.6),
-                      2: const pw.FlexColumnWidth(1.4),
-                      3: const pw.FlexColumnWidth(2),
-                    },
+                    border: pw.TableBorder.all(),
                     children: [
                       _pdfRow4(
-                        'Rec. No.',
-                        'Equipment ID',
-                        'Initial/Follow-up',
-                        'Emissivity',
-                        bold: true,
-                      ),
-                      _pdfRow4(
-                        recordNoCtrl.text.trim(),
-                        'Flir${equipmentIdCtrl.text.trim()}',
-                        statusText,
-                        emissivityCtrl.text.trim(),
-                      ),
+                          'Rec. No.', 'Equipment ID', 'Status', 'Emissivity',
+                          bold: true),
+                      _pdfRow4(recordNoCtrl.text, 'Flir${equipmentIdCtrl.text}',
+                          statusText, emissivityCtrl.text),
                     ],
                   ),
 
-                  pw.SizedBox(height: 14),
+                  pw.SizedBox(height: 20),
 
-                  /// ================= THERMAL + LOCATION =================
+                  /// ================= THERMAL + RIGHT PANEL =================
                   pw.Row(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
 
-                      /// Thermal Image
                       pw.Expanded(
                         flex: 3,
                         child: pw.Container(
+                          width: 330,
                           height: 250,
                           decoration: pw.BoxDecoration(
                             border: pw.Border.all(color: PdfColors.black),
@@ -195,96 +186,105 @@ class _ThermographyHomeState extends State<ThermographyHome> {
 
                       pw.SizedBox(width: 10),
 
-                      /// Location + Section
-                      pw.Expanded(
-                        flex: 2,
-                        child: pw.Table(
-                          border: pw.TableBorder.all(color: PdfColors.black),
+                      /// Right panel
+                      pw.SizedBox(
+                        width: 200,
+                        child: pw.Column(
                           children: [
-                            _pdfRow2('Location', locationCtrl.text),
-                            _pdfRow2('Section', sectionCtrl.text),
+
+                            /// Location + Section
+                            pw.Table(
+                              border: pw.TableBorder.all(),
+                              columnWidths: {
+                                0: const pw.FixedColumnWidth(80),
+                                1: const pw.FlexColumnWidth(),
+                              },
+                              children: [
+                                _pdfRow2('Location', locationCtrl.text),
+                                _pdfRow2('Section', sectionCtrl.text),
+                              ],
+                            ),
+
+                            /// 👉 Temps ALSO here if reference image NOT present
+                            if (refImg == null) ...[
+                              pw.SizedBox(height: 12),
+                              pw.Table(
+                                border: pw.TableBorder.all(),
+                                children: [
+                                  _pdfRow2(
+                                      'Reference Temp',
+                                      '${refPointTempCtrl.text}°C',
+                                      centerRight: true),
+                                  _pdfRow2(
+                                      'Max Temp',
+                                      '${maxTempCtrl.text}°C',
+                                      centerRight: true),
+                                  _pdfRow2(
+                                      'ΔT',
+                                      '${deltaTempCtrl.text}°C',
+                                      centerRight: true),
+                                ],
+                              ),
+                            ],
                           ],
                         ),
                       ),
                     ],
                   ),
 
-                  pw.SizedBox(height: 14),
+                  /// ================= REFERENCE BLOCK (ONLY IF EXISTS) =================
+                  if (refImg != null) ...[
+                    pw.SizedBox(height: 20),
 
-                  /// ================= REFERENCE + TEMPERATURES =================
-                  pw.Row(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-
-                      /// Reference Image
-                      pw.Expanded(
-                        flex: 3,
-                        child: pw.Container(
-                          height: 250,
-                          decoration: pw.BoxDecoration(
-                            border: pw.Border.all(color: PdfColors.black),
-                          ),
-                          child: pw.FittedBox(
-                            fit: pw.BoxFit.contain,
-                            child: pw.Image(refImg),
+                    pw.Row(
+                      children: [
+                        pw.Expanded(
+                          flex: 3,
+                          child: pw.Container(
+                            width: 330,
+                            height: 250,
+                            decoration: pw.BoxDecoration(
+                              border: pw.Border.all(color: PdfColors.black),
+                            ),
+                            child: pw.FittedBox(
+                              fit: pw.BoxFit.contain,
+                              child: pw.Image(refImg),
+                            ),
                           ),
                         ),
-                      ),
-
-                      pw.SizedBox(width: 10),
-
-                      /// Temperature Table
-                      pw.Expanded(
-                        flex: 2,
-                        child: pw.Table(
-                          border: pw.TableBorder.all(color: PdfColors.black),
-                          children: [
-
-                            _pdfRow2(
-                              'Reference Temp',
-                              '${refPointTempCtrl.text}°C',
-                              centerRight: true,
-                            ),
-
-                            _pdfRow2(
-                              'Max Temp',
-                              '${maxTempCtrl.text}°C',
-                              centerRight: true,
-                            ),
-
-                            _pdfRow2(
-                              'Delta Temp',
-                              '${deltaTempCtrl.text}°C',
-                              centerRight: true,
-                            ),
-                          ],
+                        pw.SizedBox(width: 10),
+                        pw.SizedBox(
+                          width: 200,
+                          child: pw.Table(
+                            border: pw.TableBorder.all(),
+                            children: [
+                              _pdfRow2(
+                                  'Reference Temp',
+                                  '${refPointTempCtrl.text}°C',
+                                  centerRight: true),
+                              _pdfRow2(
+                                  'Max Temp',
+                                  '${maxTempCtrl.text}°C',
+                                  centerRight: true),
+                              _pdfRow2(
+                                  'ΔT',
+                                  '${deltaTempCtrl.text}°C',
+                                  centerRight: true),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
+                  ],
 
-                  pw.SizedBox(height: 18),
+                  pw.SizedBox(height: 25),
 
                   /// ================= COMMENTS =================
-                  pw.Text(
-                    'Comments :',
-                    style: pw.TextStyle(
-                      color: PdfColors.black,
-                      fontWeight: pw.FontWeight.bold,
-                      decoration: pw.TextDecoration.underline,
-                    ),
-                  ),
-
+                  pw.Text('Comments:',
+                      style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
                   pw.SizedBox(height: 6),
-
-                  pw.Text(
-                    commentsCtrl.text.trim(),
-                    style: pw.TextStyle(
-                      color: PdfColors.black,
-                      fontWeight: pw.FontWeight.bold,
-                      fontSize: 10,
-                    ),
-                  ),
+                  pw.Text(commentsCtrl.text,
+                      style: const pw.TextStyle(fontSize: 10)),
                 ],
               ),
             );
@@ -292,36 +292,28 @@ class _ThermographyHomeState extends State<ThermographyHome> {
         ),
       );
 
-      /// ================= SAVE FILE =================
-      final suggestedName =
-          'Thermal_Report_${equipmentIdCtrl.text}_${DateTime.now().millisecondsSinceEpoch}.pdf';
-
       final savePath = await FilePicker.platform.saveFile(
         dialogTitle: 'Save Report PDF',
-        fileName: suggestedName,
+        fileName:
+        'Thermal_Report_${equipmentIdCtrl.text}_${DateTime.now().millisecondsSinceEpoch}.pdf',
         type: FileType.custom,
         allowedExtensions: ['pdf'],
       );
 
-      if (savePath == null) {
-        _snack('Save cancelled.');
-        return;
-      }
+      if (savePath == null) return;
 
       final file = File(savePath);
-
       await file.writeAsBytes(await pdf.save());
-
       await OpenFilex.open(file.path);
 
-      _snack('Report generated & opened successfully ✅');
-
+      _snack('Report generated successfully ✅');
     } catch (e) {
-      _snack('Failed to generate PDF: $e');
+      _snack('Failed: $e');
     } finally {
       if (mounted) setState(() => generating = false);
     }
   }
+
 
 
   void _snack(String msg) {
